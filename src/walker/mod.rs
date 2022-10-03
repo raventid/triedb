@@ -2,7 +2,8 @@ use std::{borrow::Borrow, sync::Arc};
 
 use primitive_types::H256;
 use rlp::Rlp;
-use crate::{merkle::{MerkleNode, MerkleValue}, Database};
+use crate::{merkle::{MerkleNode, MerkleValue}};
+use crate::rocksdb::DB as Database;
 
 use anyhow::{anyhow, Result};
 use log::*;
@@ -44,7 +45,7 @@ impl<DB, TI, DI> Walker<DB, TI, DI> {
 
 impl<DB, TI, DI> Walker<DB, TI, DI>
 where
-    DB: Database + Sync + Send,
+    DB: Borrow<Database> + Sync + Send,
     TI: TrieInspector + Sync + Send,
     DI: TrieDataInsectorRaw + Sync + Send,
 {
@@ -56,7 +57,7 @@ where
         if hash != crate::empty_trie_hash() {
             let db = self.db.borrow();
             let bytes = db
-                .get(hash);
+                .get(hash)?;
             trace!("raw bytes: {:?}", bytes);
 
             let rlp = Rlp::new(bytes);

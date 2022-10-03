@@ -2,7 +2,6 @@ use std::borrow::Borrow;
 use std::ops::{Deref, DerefMut};
 use std::sync::RwLock;
 
-use crate::Database;
 use crate::gc::ReachableHashes;
 use crate::merkle::nibble::{self, Nibble, NibbleSlice, NibbleVec};
 use crate::merkle::{MerkleNode, MerkleValue};
@@ -11,7 +10,7 @@ use rlp::Rlp;
 
 
 use sha3::{Digest, Keccak256};
-// use crate::rocksdb::OptimisticTransactionDB;
+use crate::rocksdb::DB as Database;
 use rocksdb_lib::{ColumnFamily, MergeOperands, OptimisticTransactionDB};
 
 #[cfg(feature="tracing-enable")]
@@ -101,16 +100,17 @@ impl<F: FnMut(&[u8]) -> Vec<H256> + Clone> crate::walker::inspector::TrieDataIns
 }
 
 trait MerkleValueExt<'a> {
-    fn node(&self, database: &'a impl Database) -> Option<KeyedMerkleNode<'a>> ;
+    fn node(&self, database: &'a Database) -> Option<KeyedMerkleNode<'a>> ;
 }
 impl<'a> MerkleValueExt<'a> for MerkleValue<'a> {
-    fn node(&self, database: &'a impl Database) -> Option<KeyedMerkleNode<'a>> {
+    fn node(&self, database: &'a Database) -> Option<KeyedMerkleNode<'a>> {
         Some(match self {
             Self::Empty => return None,
             Self::Full(n) => KeyedMerkleNode::Partial(n.deref().clone()),
             Self::Hash(h) =>{
-                let bytes = database.get(*h);
-                KeyedMerkleNode::FullEncoded(*h, bytes)
+                // TODO: Propagate result from here
+                let bytes = database.get(*h).map_err(|_| ())?.ok_or(())?;
+                KeyedMerkleNode::FullEncoded(*h, &bytes)
             } 
         })
     }
@@ -165,7 +165,7 @@ impl<'a> KeyedMerkleNode<'a> {
     }
 }
 
-impl<DB: Database + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + Send + Sync> DiffFinder<DB, F> {
+impl<DB: Borrow<Database> + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + Send + Sync> DiffFinder<DB, F> {
     pub fn new(db: DB, start_state_root: H256, end_state_root: H256, child_extractor: F) -> Self {
         DiffFinder {
             db,
@@ -193,36 +193,36 @@ impl<DB: Database + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + Send + Sy
         // eprintln!("traversing left tree{:?} ...", left_tree_cursor);
         // eprintln!("traversing rigth tree{:?} ...", right_tree_cursor);
 
-        let db = &self.db;
+        let db = &self.db.borrow();
 
         Ok(match (left_tree_cursor == crate::empty_trie_hash(), right_tree_cursor == crate::empty_trie_hash()) {
             (true, true) => {
                 vec![]
             }
             (true, false) => {
-                let bytes = db.get(right_tree_cursor);
+                let bytes = db.get(right_tree_cursor).map_err(|_| ())?.ok_or(())?;
                 // eprintln!("right raw bytes: {:?}", bytes);
 
-                let right_node = KeyedMerkleNode::FullEncoded(right_tree_cursor, bytes);
+                let right_node = KeyedMerkleNode::FullEncoded(right_tree_cursor, &bytes);
                 self.deep_insert(right_nibble, right_node)
             }
             (false, true) => {
-                let bytes = db.get(left_tree_cursor);
+                let bytes = db.get(left_tree_cursor).map_err(|_| ())?.ok_or(())?;
                 // eprintln!("left raw bytes: {:?}", bytes);
 
 
-                let left_node = KeyedMerkleNode::FullEncoded(left_tree_cursor, bytes);
+                let left_node = KeyedMerkleNode::FullEncoded(left_tree_cursor, &bytes);
                 self.deep_remove(left_nibble, left_node)
             }
             (false, false) => {
-                let bytes = db.get(left_tree_cursor);
+                let bytes = db.get(left_tree_cursor).map_err(|_| ())?.ok_or(())?;
                 // eprintln!("left raw bytes: {:?}", bytes);
-                let left_node = KeyedMerkleNode::FullEncoded(left_tree_cursor, bytes);
+                let left_node = KeyedMerkleNode::FullEncoded(left_tree_cursor, &bytes);
 
-                let bytes = db.get(right_tree_cursor);
+                let bytes = db.get(right_tree_cursor).map_err(|_| ())?.ok_or(())?;
                 // eprintln!("right raw bytes: {:?}", bytes);
 
-                let right_node = KeyedMerkleNode::FullEncoded(right_tree_cursor, bytes);
+                let right_node = KeyedMerkleNode::FullEncoded(right_tree_cursor, &bytes);
 
                 self.compare_nodes(left_nibble, left_node, right_nibble, right_node)
             }
