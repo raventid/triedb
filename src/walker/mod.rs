@@ -5,7 +5,7 @@ use rlp::Rlp;
 use crate::{merkle::{MerkleNode, MerkleValue}};
 use crate::rocksdb::DB as Database;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Error};
 use log::*;
 use crate::merkle::nibble::NibbleVec;
 
@@ -56,8 +56,10 @@ where
         debug!("traversing {:?} ...", hash);
         if hash != crate::empty_trie_hash() {
             let db = self.db.borrow();
-            let bytes = db
-                .get(hash)?;
+            let bytes: &[u8] = &db
+                .get(hash)
+                .map_err(|_| anyhow::anyhow!("cannot find value") )?
+                .ok_or( anyhow::anyhow!("cannot find value") )?;
             trace!("raw bytes: {:?}", bytes);
 
             let rlp = Rlp::new(bytes);

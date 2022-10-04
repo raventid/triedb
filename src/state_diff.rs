@@ -100,19 +100,18 @@ impl<F: FnMut(&[u8]) -> Vec<H256> + Clone> crate::walker::inspector::TrieDataIns
 }
 
 trait MerkleValueExt<'a> {
-    fn node(&self, database: &'a Database) -> Option<KeyedMerkleNode<'a>> ;
+    fn node(&self, database: &'a Database) -> Result<Option<KeyedMerkleNode<'a>>, ()>;
 }
 impl<'a> MerkleValueExt<'a> for MerkleValue<'a> {
-    fn node(&self, database: &'a Database) -> Option<KeyedMerkleNode<'a>> {
-        Some(match self {
-            Self::Empty => return None,
+    fn node(&self, database: &'a Database) -> Result<Option<KeyedMerkleNode<'a>>, ()> {
+        Ok(Some(match self {
+            Self::Empty => return Ok(None),
             Self::Full(n) => KeyedMerkleNode::Partial(n.deref().clone()),
-            Self::Hash(h) =>{
-                // TODO: Propagate result from here
+            Self::Hash(h) => {
                 let bytes = database.get(*h).map_err(|_| ())?.ok_or(())?;
                 KeyedMerkleNode::FullEncoded(*h, &bytes)
             } 
-        })
+        }))
     }
 }
 
@@ -328,16 +327,17 @@ impl<DB: Borrow<Database> + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + S
                         rn
                     };
                     match (left_value.node(self.db.borrow()), right_value.node(self.db.borrow())) {
-                        (Some(lnode), Some(rnode)) => changes.extend_from_slice(
+                        (Ok(Some(lnode)), Ok(Some(rnode))) => changes.extend_from_slice(
                             &self.compare_nodes(b_nibble.clone(), lnode, b_nibble.clone(), rnode),
                         ),
-                        (Some(lnode), None) => changes.extend_from_slice(
+                        (Ok(Some(lnode)), Ok(None)) => changes.extend_from_slice(
                             &self.deep_remove(b_nibble.clone(), lnode)
                         ),
-                        (None, Some(rnode)) => changes.extend_from_slice(
+                        (Ok(None), Ok(Some(rnode))) => changes.extend_from_slice(
                             &self.deep_insert(b_nibble.clone(), rnode)
                         ),
-                        (None, None) => {}
+                        (Ok(None), Ok(None)) => {},
+                        (_, _) => {}, // TODO: Handle errors
                     }
                 }
             }
@@ -483,7 +483,7 @@ impl<DB: Borrow<Database> + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + S
         );
         let r_index = right_postfix[0]; // find first different nibble
         let r_index_usize: usize = r_index.into();
-        if let Some(b_node) = <MerkleValue as MerkleValueExt>::node(&left_values[r_index_usize], self.db.borrow()) {
+        if let Ok(Some(b_node)) = <MerkleValue as MerkleValueExt>::node(&left_values[r_index_usize], self.db.borrow()) {
             let b_nibble = {
                 let mut ln = left_nibble_prefix.clone();
                 ln.push(r_index);
@@ -505,7 +505,7 @@ impl<DB: Borrow<Database> + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + S
                 ln.push(Nibble::from(index));
                 ln
             };
-            if let Some(b_node) = value.node(self.db.borrow()) {
+            if let Ok(Some(b_node)) = value.node(self.db.borrow()) {
                 // Compare changed nodes
                 if r_index == Nibble::from(index) {
                     // Logic mooved before cycle
@@ -532,6 +532,7 @@ impl<DB: Borrow<Database> + Send+ Sync, F: FnMut(&[u8]) -> Vec<H256> + Clone + S
     ) -> Vec<Change> {
         let left_node = left_value
             .node(self.db.borrow())
+            .expect("TODO: return error (unwrapping falliable operation)")
             .expect("Extension should never link to empty value");
         self.compare_nodes(left_nibble, left_node, right_nibble, right_node)
     }
