@@ -16,6 +16,10 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
+      - name: Additional Debian packages
+        run: |
+          apt-get update
+          apt-get install clang llvm -y
       - uses: actions/checkout@v2
       - name: Installing fmt and clippy
         run: |
@@ -25,7 +29,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all -- --check
+          args: -- --check
       - name: Try to use cached dependencies
         uses: actions/cache@v2
         with:
@@ -33,7 +37,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-v1-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run clippy
         uses: actions-rs/cargo@v1
         with:
