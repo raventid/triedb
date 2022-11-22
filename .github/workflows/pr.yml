@@ -19,7 +19,7 @@ jobs:
       - name: Additional Debian packages
         run: |
           apt-get update
-          apt-get install clang -y
+          apt-get install clang llvm -y
       - uses: actions/checkout@v2
       - name: Installing fmt and clippy
         run: |
